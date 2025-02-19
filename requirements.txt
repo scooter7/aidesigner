@@ -1,6 +1,5 @@
 streamlit
+openai
 torch
 Pillow
 transformers
-diffusers
-accelerate
