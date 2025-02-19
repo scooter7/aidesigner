@@ -107,8 +107,10 @@ def display_training_images(image_files):
 def load_stable_diffusion():
     # Use float16 on CUDA if available; otherwise, fall back to float32.
     dtype = torch.float16 if device == "cuda" else torch.float32
+    # Explicitly set revision="main" to avoid the fp16 revision error.
     pipe = StableDiffusionPipeline.from_pretrained(
         "runwayml/stable-diffusion-v1-5",
+        revision="main",
         torch_dtype=dtype
     )
     pipe = pipe.to(device)
