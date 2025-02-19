@@ -3,3 +3,4 @@ openai
 torch
 Pillow
 transformers
+requests
