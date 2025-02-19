@@ -1,14 +1,13 @@
 import os
 import streamlit as st
-import openai
 import torch
 import requests
 from transformers import CLIPProcessor, CLIPModel
 from PIL import Image
 from collections import Counter
 
-# Set your OpenAI API key from Streamlit secrets.
-openai.api_key = st.secrets["openai"]["api_key"]
+# Get your OpenAI API key from Streamlit secrets.
+API_KEY = st.secrets["openai"]["api_key"]
 
 # Set up device for inference.
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -111,8 +110,9 @@ def generate_design_image_openai(user_prompt, style_context):
     This function calls the API directly via requests.
     """
     combined_prompt = f"Design an image with the following style characteristics: {style_context}. {user_prompt}"
+    
     headers = {
-         "Authorization": f"Bearer {openai.api_key}",
+         "Authorization": f"Bearer {API_KEY}",
          "Content-Type": "application/json"
     }
     data = {
