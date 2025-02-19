@@ -1,16 +1,19 @@
 import os
 import streamlit as st
-import openai
 import torch
-import clip
+from transformers import CLIPProcessor, CLIPModel
+from diffusers import StableDiffusionPipeline
 from PIL import Image
 from collections import Counter
 
-# Set up device for CLIP
+# Set up device for inference.
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
-# Load the CLIP model and preprocessing function.
-model, preprocess = clip.load("ViT-B/32", device=device)
+# ---------------------------
+# Load CLIP Model & Processor
+# ---------------------------
+clip_model = CLIPModel.from_pretrained("openai/clip-vit-base-patch32").to(device)
+clip_processor = CLIPProcessor.from_pretrained("openai/clip-vit-base-patch32")
 
 # Define a list of adjectives that might describe a design style.
 ADJECTIVES = [
@@ -20,11 +23,19 @@ ADJECTIVES = [
     "classic", "innovative", "textured", "sleek", "artistic"
 ]
 
-# Pre-compute CLIP text embeddings for the adjectives.
-text_inputs = torch.cat([clip.tokenize(adj) for adj in ADJECTIVES]).to(device)
-with torch.no_grad():
-    text_embeddings = model.encode_text(text_inputs)
-text_embeddings /= text_embeddings.norm(dim=-1, keepdim=True)
+def get_adjective_embeddings():
+    """
+    Pre-compute CLIP text embeddings for the adjectives.
+    """
+    inputs = clip_processor(text=ADJECTIVES, return_tensors="pt", padding=True).to(device)
+    with torch.no_grad():
+        text_embeds = clip_model.get_text_features(**inputs)
+    # Normalize the embeddings.
+    text_embeds = text_embeds / text_embeds.norm(dim=-1, keepdim=True)
+    return text_embeds
+
+# Pre-compute the adjective embeddings.
+text_embeddings = get_adjective_embeddings()
 
 def image_to_adjectives(image_path, top_k=3):
     """
@@ -32,14 +43,14 @@ def image_to_adjectives(image_path, top_k=3):
     (from our predefined list) that best match the image.
     """
     image = Image.open(image_path).convert("RGB")
-    image_input = preprocess(image).unsqueeze(0).to(device)
+    inputs = clip_processor(images=image, return_tensors="pt").to(device)
     with torch.no_grad():
-        image_embedding = model.encode_image(image_input)
-    image_embedding /= image_embedding.norm(dim=-1, keepdim=True)
+        image_embedding = clip_model.get_image_features(**inputs)
+    image_embedding = image_embedding / image_embedding.norm(dim=-1, keepdim=True)
     
     # Compute cosine similarity between the image embedding and each adjective embedding.
     similarity = (image_embedding @ text_embeddings.T).squeeze(0)
-    values, indices = similarity.topk(top_k)
+    _, indices = similarity.topk(top_k)
     selected = [ADJECTIVES[idx] for idx in indices.cpu().numpy()]
     return selected
 
@@ -84,43 +95,43 @@ def display_training_images(image_files):
     st.sidebar.header("Training Images (Design Portfolio)")
     for image_path in image_files:
         try:
-            image = Image.open(image_path)
-            st.sidebar.image(image, caption=os.path.basename(image_path), use_column_width=True)
+            img = Image.open(image_path)
+            st.sidebar.image(img, caption=os.path.basename(image_path), use_container_width=True)
         except Exception as e:
             st.sidebar.write(f"Error loading {image_path}: {e}")
 
-# Securely load your OpenAI API key from Streamlit secrets.
-openai.api_key = st.secrets["openai"]["api_key"]
+# ---------------------------
+# Load Stable Diffusion Pipeline
+# ---------------------------
+@st.cache_resource(show_spinner=False)
+def load_stable_diffusion():
+    pipe = StableDiffusionPipeline.from_pretrained(
+        "runwayml/stable-diffusion-v1-5", 
+        revision="fp16", 
+        torch_dtype=torch.float16
+    )
+    pipe = pipe.to(device)
+    return pipe
 
-def generate_design_description(user_prompt, style_context):
+stable_diffusion_pipe = load_stable_diffusion()
+
+def generate_design_image(user_prompt, style_context):
     """
     Combines the user's design prompt with the extracted style context and
-    generates a design description using GPT-4.
+    generates a new design image using Stable Diffusion.
     """
-    full_prompt = (
-        f"Based on my design portfolio characterized by these style adjectives: {style_context}. "
-        f"{user_prompt}"
-    )
-    response = openai.chat.completions.create(
-        model="gpt-4",  # Change model if necessary.
-        messages=[
-            {
-                "role": "system", 
-                "content": "You are a creative design assistant who understands a unique design style derived from a portfolio of images."
-            },
-            {"role": "user", "content": full_prompt}
-        ],
-        temperature=0.7,
-        max_tokens=150
-    )
-    return response.choices[0].message.content.strip()
+    combined_prompt = f"Design an image with the following style characteristics: {style_context}. {user_prompt}"
+    with torch.no_grad():
+        result = stable_diffusion_pipe(combined_prompt)
+    return result.images[0]
 
-# --- Streamlit App Layout ---
+# ---------------------------
+# Streamlit App Layout
+# ---------------------------
+st.title("AI Design Assistant with CLIP-based Style Extraction & Image Generation")
+st.write("This app extracts design style characteristics from my portfolio using CLIP and uses Stable Diffusion to generate new images that blend the extracted style with your design prompt.")
 
-st.title("AI Design Assistant with CLIP-based Style Extraction")
-st.write("This app extracts style adjectives from my design portfolio using CLIP and uses GPT-4 to generate creative design descriptions.")
-
-# Load training images.
+# Load and display training images.
 training_images = load_training_images()
 if training_images:
     display_training_images(training_images)
@@ -133,14 +144,14 @@ else:
 # User input for the design prompt.
 user_prompt = st.text_input(
     "Enter your design prompt:",
-    "Describe a modern minimalist design with vibrant colors."
+    "A modern minimalist living room with vibrant colors."
 )
 
-if st.button("Generate Design Description"):
+if st.button("Generate Design Image"):
     if user_prompt and training_images:
-        with st.spinner("Generating design description..."):
-            description = generate_design_description(user_prompt, style_context)
-        st.subheader("Generated Design Description:")
-        st.write(description)
+        with st.spinner("Generating design image..."):
+            design_image = generate_design_image(user_prompt, style_context)
+        st.subheader("Generated Design Image:")
+        st.image(design_image, use_container_width=True)
     else:
         st.warning("Please enter a design prompt and ensure training images are available.")
