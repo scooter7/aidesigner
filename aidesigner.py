@@ -2,6 +2,7 @@ import os
 import streamlit as st
 import openai
 import torch
+import requests
 from transformers import CLIPProcessor, CLIPModel
 from PIL import Image
 from collections import Counter
@@ -106,20 +107,28 @@ def display_training_images(image_files):
 def generate_design_image_openai(user_prompt, style_context):
     """
     Combines the user's design prompt with the extracted style context and
-    generates a new design image using OpenAI's DALL·E image generation API.
+    generates a new design image using OpenAI's image generation endpoint.
+    This function calls the API directly via requests.
     """
     combined_prompt = f"Design an image with the following style characteristics: {style_context}. {user_prompt}"
+    headers = {
+         "Authorization": f"Bearer {openai.api_key}",
+         "Content-Type": "application/json"
+    }
+    data = {
+         "prompt": combined_prompt,
+         "n": 1,
+         "size": "512x512"
+    }
     try:
-        response = openai.Image.create(
-            prompt=combined_prompt,
-            n=1,
-            size="512x512"
-        )
-        image_url = response["data"][0]["url"]
-        return image_url
+         response = requests.post("https://api.openai.com/v1/images/generations", headers=headers, json=data)
+         response.raise_for_status()
+         result = response.json()
+         image_url = result["data"][0]["url"]
+         return image_url
     except Exception as e:
-        st.error(f"Error during image generation: {e}")
-        return None
+         st.error(f"Error during image generation: {e}")
+         return None
 
 # ---------------------------
 # Streamlit App Layout
