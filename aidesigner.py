@@ -6,11 +6,11 @@ from transformers import CLIPProcessor, CLIPModel
 from PIL import Image
 from collections import Counter
 
-# Set up device for inference.
-device = "cuda" if torch.cuda.is_available() else "cpu"
-
 # Set your OpenAI API key from Streamlit secrets.
 openai.api_key = st.secrets["openai"]["api_key"]
+
+# Set up device for inference.
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 # ---------------------------
 # Load CLIP Model & Processor
@@ -106,14 +106,14 @@ def display_training_images(image_files):
 def generate_design_image_openai(user_prompt, style_context):
     """
     Combines the user's design prompt with the extracted style context and
-    generates a new design image using OpenAI's image generation API.
+    generates a new design image using OpenAI's DALL·E image generation API.
     """
     combined_prompt = f"Design an image with the following style characteristics: {style_context}. {user_prompt}"
     try:
         response = openai.Image.create(
             prompt=combined_prompt,
             n=1,
-            size="512x512"  # You can also try "1024x1024"
+            size="512x512"
         )
         image_url = response["data"][0]["url"]
         return image_url
