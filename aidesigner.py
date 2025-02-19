@@ -1,13 +1,16 @@
 import os
 import streamlit as st
+import openai
 import torch
 from transformers import CLIPProcessor, CLIPModel
-from diffusers import StableDiffusionPipeline
 from PIL import Image
 from collections import Counter
 
 # Set up device for inference.
 device = "cuda" if torch.cuda.is_available() else "cpu"
+
+# Set your OpenAI API key from Streamlit secrets.
+openai.api_key = st.secrets["openai"]["api_key"]
 
 # ---------------------------
 # Load CLIP Model & Processor
@@ -100,39 +103,29 @@ def display_training_images(image_files):
         except Exception as e:
             st.sidebar.write(f"Error loading {image_path}: {e}")
 
-# ---------------------------
-# Load Stable Diffusion Pipeline
-# ---------------------------
-@st.cache_resource(show_spinner=False)
-def load_stable_diffusion():
-    # Use float16 on CUDA if available; otherwise, fall back to float32.
-    dtype = torch.float16 if device == "cuda" else torch.float32
-    # Explicitly set revision="main" to avoid the fp16 revision error.
-    pipe = StableDiffusionPipeline.from_pretrained(
-        "runwayml/stable-diffusion-v1-5",
-        revision="main",
-        torch_dtype=dtype
-    )
-    pipe = pipe.to(device)
-    return pipe
-
-stable_diffusion_pipe = load_stable_diffusion()
-
-def generate_design_image(user_prompt, style_context):
+def generate_design_image_openai(user_prompt, style_context):
     """
     Combines the user's design prompt with the extracted style context and
-    generates a new design image using Stable Diffusion.
+    generates a new design image using OpenAI's image generation API.
     """
     combined_prompt = f"Design an image with the following style characteristics: {style_context}. {user_prompt}"
-    with torch.no_grad():
-        result = stable_diffusion_pipe(combined_prompt)
-    return result.images[0]
+    try:
+        response = openai.Image.create(
+            prompt=combined_prompt,
+            n=1,
+            size="512x512"  # You can also try "1024x1024"
+        )
+        image_url = response["data"][0]["url"]
+        return image_url
+    except Exception as e:
+        st.error(f"Error during image generation: {e}")
+        return None
 
 # ---------------------------
 # Streamlit App Layout
 # ---------------------------
-st.title("AI Design Assistant with CLIP-based Style Extraction & Image Generation")
-st.write("This app extracts design style characteristics from my portfolio using CLIP and uses Stable Diffusion to generate new images that blend the extracted style with your design prompt.")
+st.title("AI Design Assistant with CLIP-based Style Extraction & OpenAI Image Generation")
+st.write("This app extracts design style characteristics from my portfolio using CLIP and uses OpenAI's image generation API to create new images that blend the extracted style with your design prompt.")
 
 # Load and display training images.
 training_images = load_training_images()
@@ -153,8 +146,9 @@ user_prompt = st.text_input(
 if st.button("Generate Design Image"):
     if user_prompt and training_images:
         with st.spinner("Generating design image..."):
-            design_image = generate_design_image(user_prompt, style_context)
-        st.subheader("Generated Design Image:")
-        st.image(design_image, use_container_width=True)
+            image_url = generate_design_image_openai(user_prompt, style_context)
+        if image_url:
+            st.subheader("Generated Design Image:")
+            st.image(image_url, use_container_width=True)
     else:
         st.warning("Please enter a design prompt and ensure training images are available.")
